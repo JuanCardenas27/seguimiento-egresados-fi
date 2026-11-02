@@ -1,0 +1,67 @@
+services:
+  db:
+    image: mariadb:11.4
+    container_name: egresados-db
+    # event-scheduler para la purga de capturas
+    command: ["--event-scheduler=ON", "--default-time-zone=-05:00"]
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root_dev}
+      PROCESO_DB_PASSWORD: ${PROCESO_DB_PASSWORD:-proceso_dev}
+      API_DB_PASSWORD: ${API_DB_PASSWORD:-api_lectura_dev}
+      ANALISTA_DB_PASSWORD: ${ANALISTA_DB_PASSWORD:-analista_dev}
+      OFICIAL_DB_PASSWORD: ${OFICIAL_DB_PASSWORD:-oficial_dev}
+      TZ: America/Bogota
+    volumes:
+      # los scripts de db/ corren en orden al crear la base
+      - ./db:/docker-entrypoint-initdb.d:ro
+      - datos_mariadb:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # pruebas unitarias y luego el proceso con los datos ficticios
+  etl:
+    build:
+      context: ./app
+      additional_contexts:
+        db: ./db
+    container_name: egresados-etl
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: proceso
+      DB_PASSWORD: ${PROCESO_DB_PASSWORD:-proceso_dev}
+      TZ: America/Bogota
+    command: ["sh", "-c", "python -m unittest discover -s etl/tests -t . && python manage.py ejecutar_proceso --canal archivo"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./app
+      additional_contexts:
+        db: ./db
+    container_name: egresados-api
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: api_lectura
+      DB_PASSWORD: ${API_DB_PASSWORD:-api_lectura_dev}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-admin}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-admin_dev}
+      DJANGO_SUPERUSER_EMAIL: admin@example.com
+      TZ: America/Bogota
+    ports:
+      - "8000:8000"
+    depends_on:
+      etl:
+        condition: service_completed_successfully
+
+volumes:
+  datos_mariadb:
