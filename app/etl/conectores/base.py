@@ -8,6 +8,13 @@ class PerfilNoDisponible(Exception):
     """El perfil ya no existe, es privado o la fuente no lo entrega."""
 
 
+class PerfilRestringido(PerfilNoDisponible):
+    """LinkedIn mostró un muro de inicio de sesión o un CAPTCHA en lugar del perfil.
+
+    Puede ser una restricción del perfil o un bloqueo general: el proceso solo lo cuenta como
+    no disponible si el muro es aislado (otros perfiles de la misma ejecución sí se leen)."""
+
+
 class FuenteBloqueada(Exception):
     """La fuente respondió con un límite de solicitudes o un bloqueo: la ejecución se detiene."""
 

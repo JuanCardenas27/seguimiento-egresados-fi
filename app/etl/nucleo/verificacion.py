@@ -16,7 +16,10 @@ DURACION_PLAUSIBLE = {  # años entre inicio y fin
     "TECNOLOGICO": (2, 5), "PREGRADO": (4, 9), "ESPECIALIZACION": (1, 3),
     "MAESTRIA": (1, 5), "DOCTORADO": (3, 8), "POSDOCTORADO": (1, 4),
 }
-_RE_INGENIERIA = re.compile(r"(?i)ingenier|engineer")
+_RE_INGENIERIA = re.compile(r"(?i)ingenier|engineer|\bing\b\.?")
+# Puntaje del programa cuando el perfil no trae título ni campo (canal A) y se infiere de la consulta
+PUNTAJE_PROGRAMA_INFERIDO = 20
+PRIORIDAD_EXCLUSION = ("OTRA_SEDE", "ESTUDIANTE", "OTRA_FACULTAD")
 
 
 @dataclass(frozen=True)
@@ -79,7 +82,9 @@ class Resultado:
     formaciones: list[EvaluacionFormacion]
 
 
-def evaluar(perfil: dict, reglas: Reglas, hoy: date) -> Resultado:
+def evaluar(perfil: dict, reglas: Reglas, hoy: date, pista_programa: str | None = None) -> Resultado:
+    """pista_programa: consulta del buscador que encontró el perfil. Solo se usa cuando la formación
+    no trae título ni campo (la versión pública del perfil no los publica)."""
     residencia = perfil.get("ubicacion") or ""
     evaluadas: list[EvaluacionFormacion] = []
 
@@ -96,16 +101,26 @@ def evaluar(perfil: dict, reglas: Reglas, hoy: date) -> Resultado:
             evaluadas.append(ev)
             continue
 
-        ev.id_programa = reglas.programa_de(texto_prog, ev.codigo_nivel or "PREGRADO")
+        inicio, fin = fechas.anio(edu.get("inicio")), fechas.anio(edu.get("fin"))
+        es_ingenieria = bool(_RE_INGENIERIA.search(texto_prog))
+        if texto_prog.strip():
+            ev.id_programa = reglas.programa_de(texto_prog, ev.codigo_nivel or "PREGRADO")
+            # C2 programa: solo cuenta si el texto habla de ingeniería ("Diseño Industrial" o "Química"
+            # coinciden con el patrón del programa, pero no son de la Facultad)
+            ev.criterios["programa"] = (30 if ev.id_programa and es_ingenieria
+                                        else 10 if es_ingenieria else 0)
+            if ev.id_programa is None and not es_ingenieria:
+                ev.exclusion = "OTRA_FACULTAD"
+        else:
+            # sin título ni campo: el programa se infiere de la consulta que encontró el perfil
+            ev.id_programa = reglas.programa_de(pista_programa or "", "PREGRADO")
+            ev.criterios["programa"] = PUNTAJE_PROGRAMA_INFERIDO if ev.id_programa else 0
         if ev.id_programa and ev.codigo_nivel is None:
             ev.codigo_nivel = "PREGRADO"
-        inicio, fin = fechas.anio(edu.get("inicio")), fechas.anio(edu.get("fin"))
 
         # C1 institución
         ev.criterios["institucion"] = (35 if "UNAL_PAGINA" in senales
                                        else 30 if "UNAL_NOMBRE" in senales else 10)
-        # C2 programa
-        ev.criterios["programa"] = 30 if ev.id_programa else (10 if _RE_INGENIERIA.search(texto_prog) else 0)
         # C3 condición de egresado
         ev.criterios["condicion"] = (15 if fin and fin <= hoy.year else 0) + (5 if nivel_titulo else 0)
         # C4 sede
@@ -130,7 +145,8 @@ def evaluar(perfil: dict, reglas: Reglas, hoy: date) -> Resultado:
     if not unal:
         return Resultado("DESCARTADO", 0, {}, "SIN_FORMACION_UNAL", evaluadas)
     if not validas:
-        motivo = "OTRA_SEDE" if any(e.exclusion == "OTRA_SEDE" for e in unal) else "ESTUDIANTE"
+        motivos = {e.exclusion for e in unal}
+        motivo = next(m for m in PRIORIDAD_EXCLUSION if m in motivos)
         return Resultado("EXCLUIDO", 0, {}, motivo, evaluadas)
 
     mejor = max(validas, key=lambda e: (e.puntaje, e.id_programa is not None))

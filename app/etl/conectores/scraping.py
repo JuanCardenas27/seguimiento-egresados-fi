@@ -8,10 +8,12 @@ import urllib.request
 from datetime import datetime
 from html.parser import HTMLParser
 
-from .base import Extractor, FuenteBloqueada, PerfilCapturado, PerfilNoDisponible
+from .base import Extractor, FuenteBloqueada, PerfilCapturado, PerfilNoDisponible, PerfilRestringido
 
-VERSION_ANALIZADOR = "1.0.0"
+VERSION_ANALIZADOR = "1.0.1"
 PAUSA_MIN, PAUSA_MAX = 10.0, 20.0
+# muros seguidos que indican un bloqueo general y no una restricción del perfil
+MUROS_PARA_DETENER = 3
 # LinkedIn redirige a estas rutas cuando no muestra el perfil
 _MARCAS_MURO = ("authwall", "uas/login", "checkpoint/challenge", "captcha")
 
@@ -105,12 +107,18 @@ def analizar_html(html: str, id_publico: str) -> dict:
                               "titulo": None, "campo": None, "inicio": inicio, "fin": fin})
 
     experiencia = []
+    # el jobTitle de la persona es su cargo actual: solo se asigna al primer empleo vigente
+    cargo_actual = _texto(persona.get("jobTitle"))
     for org in _como_lista(persona.get("worksFor")):
         if isinstance(org, dict) and _texto(org):
             inicio, fin = _periodo(org)
             rol = next((m for m in _como_lista(org.get("member")) if isinstance(m, dict)), {})
+            cargo = rol.get("roleName") or rol.get("jobTitle")
+            if not cargo and not fin and cargo_actual:
+                cargo, cargo_actual = cargo_actual, None
             experiencia.append({
-                "cargo": rol.get("roleName") or rol.get("jobTitle") or _texto(persona.get("jobTitle")),
+                # sin cargo, minimizar() descarta la experiencia
+                "cargo": cargo,
                 "empresa": _texto(org), "url_empresa": org.get("url"),
                 "ubicacion": _localidad(org.get("location") or org.get("address")),
                 "inicio": inicio, "fin": fin,
@@ -141,6 +149,7 @@ class ExtractorScraping(Extractor):
         self.agente = (f"SeguimientoEgresadosFI/{VERSION_ANALIZADOR} "
                        f"(Facultad de Ingenieria, Universidad Nacional de Colombia; +mailto:{contacto})")
         self.pausa = pausa
+        self._muros_seguidos = 0
 
     def _descargar(self, url: str) -> tuple[str, str]:
         # sin cookies ni sesión
@@ -161,5 +170,10 @@ class ExtractorScraping(Extractor):
         time.sleep(random.uniform(*self.pausa))
         url_final, html = self._descargar(f"https://www.linkedin.com/in/{id_publico}/")
         if es_muro(url_final, html):
-            raise PerfilNoDisponible(f"{id_publico}: muro de inicio de sesión o CAPTCHA")
+            self._muros_seguidos += 1
+            if self._muros_seguidos >= MUROS_PARA_DETENER:
+                # LinkedIn está mostrando el muro a todo el tráfico: no es culpa de los perfiles
+                raise FuenteBloqueada(f"{self._muros_seguidos} muros seguidos (último: {id_publico})")
+            raise PerfilRestringido(f"{id_publico}: muro de inicio de sesión o CAPTCHA")
+        self._muros_seguidos = 0
         return PerfilCapturado(analizar_html(html, id_publico), datetime.now())

@@ -7,7 +7,8 @@ from datetime import date, datetime, timedelta
 from django.db import connections, transaction
 
 from . import config
-from .conectores.base import Buscador, Extractor, FuenteBloqueada, PerfilCapturado, PerfilNoDisponible
+from .conectores.base import (Buscador, Extractor, FuenteBloqueada, PerfilCapturado, PerfilNoDisponible,
+                              PerfilRestringido)
 from .nucleo import fechas, geografia, organizaciones, vinculo
 from .nucleo.perfil import hash_contenido, minimizar, serializar
 from .nucleo.texto import huella, id_empresa_desde_url, id_publico_desde_url, sha256
@@ -34,9 +35,16 @@ class Proceso:
             filas = [dict(zip(columnas, f)) for f in cur.fetchall()]
         return (filas[0] if filas else None) if uno else filas
 
-    def _incidencia(self, tipo, entidad, id_registro, id_egresado, descripcion):
-        self._q("""INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-                   VALUES (%s, %s, %s, %s, %s)""", (tipo, entidad, id_registro, id_egresado, descripcion[:500]))
+    def _incidencia(self, tipo, entidad, id_registro, id_egresado, descripcion, clave=""):
+        """Registra la incidencia; si ya existía resuelta y el problema reaparece, la reabre."""
+        self._q("""INSERT INTO incidencia_calidad (codigo_tipo, entidad, id_registro, clave, id_egresado, descripcion)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   ON DUPLICATE KEY UPDATE descripcion = VALUES(descripcion), id_egresado = VALUES(id_egresado),
+                          detectada_en = IF(estado = 'RESUELTA', CURRENT_TIMESTAMP, detectada_en),
+                          resuelta_en  = IF(estado = 'RESUELTA', NULL, resuelta_en),
+                          resuelta_por = IF(estado = 'RESUELTA', NULL, resuelta_por),
+                          estado       = IF(estado = 'RESUELTA', 'ABIERTA', estado)""",
+                (tipo, entidad, id_registro, clave, id_egresado, descripcion[:500]))
 
     def iniciar(self, etapa: str, canal: str | None, parametros: dict):
         self.id_ejecucion = self._q(
@@ -116,11 +124,16 @@ class Proceso:
                 WHERE id_publico_linkedin IS NOT NULL
                   -- los perfiles del canal consentido se actualizan con una nueva exportación
                   AND COALESCE(consulta_origen, '') <> 'EXPORTACION_TITULAR'
+                  -- una cuenta fusionada en otro registro ya no se consulta
+                  AND NOT EXISTS (SELECT 1 FROM egresado e WHERE e.id_candidato = candidato.id_candidato
+                                     AND e.estado_registro = 'FUSIONADO')
                   AND (estado = 'PENDIENTE'
                        OR (estado IN ('EXTRAIDO', 'NO_DISPONIBLE')
                            AND ultimo_intento_en < NOW() - INTERVAL %s DAY))
                 ORDER BY ultimo_intento_en IS NOT NULL, ultimo_intento_en
                 LIMIT %s""", (dias_refresco, limite))
+        # perfiles con muro: solo cuentan como no disponibles si la fuente no resulta bloqueada
+        restringidos = []
         for cand in pendientes:
             self.contadores["leidos"] += 1
             if cand["hash_id_publico"] in excluidos:
@@ -128,14 +141,18 @@ class Proceso:
                 continue
             try:
                 capturado = extractor.obtener(cand["id_publico_linkedin"])
+            except PerfilRestringido:
+                restringidos.append(cand)
+                continue
             except PerfilNoDisponible:
                 self._no_disponible(cand)
                 continue
             except FuenteBloqueada:
-                # se reintenta en la siguiente ejecución
+                # se reintenta en la siguiente ejecución; los muros previos eran parte del bloqueo
                 log.warning("Fuente bloqueada; extracción detenida en %s", cand["id_publico_linkedin"])
                 self.contadores["errores"] += 1
                 self.contadores["extraccion_detenida_por_bloqueo"] += 1
+                restringidos.clear()
                 break
             except Exception as e:  # sigue con el siguiente
                 log.exception("Error extrayendo %s", cand["id_publico_linkedin"])
@@ -144,6 +161,8 @@ class Proceso:
                         (cand["id_candidato"],))
                 continue
             self._guardar_captura(cand, capturado, extractor.codigo_canal)
+        for cand in restringidos:
+            self._no_disponible(cand)
         return self.contadores
 
     def importar_exportacion(self, capturado: PerfilCapturado, id_publico: str) -> Counter:
@@ -214,8 +233,9 @@ class Proceso:
     # 3. Procesar
     def procesar(self, meses_vigencia=config.MESES_VIGENCIA) -> Counter:
         capturas = self._q(
-            """SELECT k.id_captura, k.id_candidato, k.capturada_en, k.contenido
-                 FROM captura k WHERE NOT k.procesada AND k.contenido IS NOT NULL
+            """SELECT k.id_captura, k.id_candidato, k.capturada_en, k.contenido, c.consulta_origen
+                 FROM captura k JOIN candidato c ON c.id_candidato = k.id_candidato
+                WHERE NOT k.procesada AND k.contenido IS NOT NULL
                 ORDER BY k.capturada_en, k.id_captura""")
         for k in capturas:
             try:
@@ -224,6 +244,8 @@ class Proceso:
             except Exception:
                 log.exception("Error procesando la captura %s", k["id_captura"])
                 self.contadores["errores"] += 1
+                # la transacción se revirtió: las cachés pueden apuntar a organizaciones que ya no existen
+                self._reglas = None
         with self.conexion.cursor() as cur:
             cur.execute("CALL sp_homologar_cargos()")
             fila = cur.fetchone()
@@ -238,8 +260,13 @@ class Proceso:
 
     def _procesar_captura(self, k: dict):
         perfil = json.loads(k["contenido"])
-        res = evaluar(perfil, self.reglas, self.hoy)
+        res = evaluar(perfil, self.reglas, self.hoy, k.get("consulta_origen"))
         existente = self._q("SELECT * FROM egresado WHERE id_candidato = %s", (k["id_candidato"],), uno=True)
+        if existente and existente["estado_registro"] == "FUSIONADO":
+            # sus datos ya se unieron a otro registro, que se actualiza con su propia cuenta
+            self._q("UPDATE captura SET procesada = TRUE WHERE id_captura = %s", (k["id_captura"],))
+            self.contadores["capturas_de_registros_fusionados"] += 1
+            return
         if res.decision in ("DESCARTADO", "EXCLUIDO") and existente is None:
             # no es egresado: solo se guarda la huella
             self._q("""UPDATE candidato SET id_publico_linkedin = NULL, estado = 'DESCARTADO', motivo_estado = %s
@@ -252,13 +279,14 @@ class Proceso:
         if res.decision in ("DESCARTADO", "EXCLUIDO"):
             # ya estaba consolidado, queda para revisión manual
             self._incidencia("AMBIGUO", "egresado", existente["id_egresado"], existente["id_egresado"],
-                             f"La última captura ya no confirma la pertenencia ({res.motivo})")
+                             f"La última captura ya no confirma la pertenencia ({res.motivo})",
+                             clave="PERTENENCIA_NO_CONFIRMADA")
             self._q("UPDATE captura SET procesada = TRUE WHERE id_captura = %s", (k["id_captura"],))
             return
 
         id_egresado = self._consolidar_egresado(k, perfil, res, existente)
-        self._consolidar_formacion(id_egresado, k["id_captura"], perfil, res)
-        self._consolidar_experiencia(id_egresado, k["id_captura"], perfil)
+        self._consolidar_formacion(id_egresado, k["id_captura"], k["id_candidato"], perfil, res)
+        self._consolidar_experiencia(id_egresado, k["id_captura"], k["id_candidato"], perfil)
         self._q("UPDATE captura SET procesada = TRUE WHERE id_captura = %s", (k["id_captura"],))
         self.contadores["aceptados" if res.decision == "ACEPTADO" else "por_revisar"] += 1
 
@@ -296,7 +324,7 @@ class Proceso:
                 (*datos.values(), k["capturada_en"], existente["id_egresado"]))
         return existente["id_egresado"]
 
-    def _consolidar_formacion(self, id_egresado, id_captura, perfil, res):
+    def _consolidar_formacion(self, id_egresado, id_captura, id_candidato, perfil, res):
         vistas = []
         for edu, ev in zip(perfil["educacion"], res.formaciones):
             inicio, fin = fechas.anio(edu.get("inicio")), fechas.anio(edu.get("fin"))
@@ -314,21 +342,25 @@ class Proceso:
                     (id_egresado, id_captura, h, edu["institucion"][:200], (edu.get("titulo") or None),
                      (edu.get("campo") or None), es_facultad, ev.id_programa if es_facultad else None,
                      ev.codigo_nivel, inicio, None if en_curso else fin, en_curso))
-        self._marcar_no_vigentes("formacion", id_egresado, vistas)
+        self._marcar_no_vigentes("formacion", id_egresado, id_candidato, vistas)
 
-    def _consolidar_experiencia(self, id_egresado, id_captura, perfil):
+    def _consolidar_experiencia(self, id_egresado, id_captura, id_candidato, perfil):
         vistas = []
+        claves_incidencia = []  # una incidencia por experiencia, no una por egresado
         for x in perfil["experiencia"]:
             inicio = fechas.interpretar(x.get("inicio"))
             fin = fechas.interpretar(x.get("fin"))
             descripcion = f'"{x["cargo"]}" en {x["empresa"]}'
+            clave = "EXP:" + huella(x["empresa"], x["cargo"], x.get("inicio"))
             if inicio is None:
+                claves_incidencia.append(clave)
                 self._incidencia("INCOMPLETO", "egresado", id_egresado, id_egresado,
-                                 f"Experiencia sin fecha de inicio reconocible: {descripcion}")
+                                 f"Experiencia sin fecha de inicio reconocible: {descripcion}", clave)
                 continue
             if inicio.fecha > self.hoy or (fin and (fin.fecha < inicio.fecha or fin.fecha > self.hoy)):
+                claves_incidencia.append(clave)
                 self._incidencia("INCONSISTENTE", "egresado", id_egresado, id_egresado,
-                                 f"Fechas inválidas en la experiencia {descripcion}")
+                                 f"Fechas inválidas en la experiencia {descripcion}", clave)
                 continue
             id_org = self._organizacion(x)
             ubic = geografia.resolver(x.get("ubicacion"), self.alias_ubicacion)
@@ -349,13 +381,25 @@ class Proceso:
                      inicio.fecha, inicio.precision, fin.fecha if fin else None, fin.precision if fin else None,
                      fin is None and fechas.es_actual(x.get("fin")), (x.get("ubicacion") or None),
                      ubic.codigo_pais, ubic.codigo_municipio, ubic.ciudad_extranjera))
-        self._marcar_no_vigentes("experiencia_laboral", id_egresado, vistas)
+        self._marcar_no_vigentes("experiencia_laboral", id_egresado, id_candidato, vistas)
+        # las experiencias corregidas en el perfil cierran su incidencia
+        filtro = f"AND clave NOT IN ({', '.join(['%s'] * len(claves_incidencia))})" if claves_incidencia else ""
+        self._q(f"""UPDATE incidencia_calidad
+                       SET estado = 'RESUELTA', resuelta_en = CURRENT_TIMESTAMP, resuelta_por = 'sistema'
+                     WHERE entidad = 'egresado' AND id_registro = %s AND estado = 'ABIERTA'
+                       AND codigo_tipo IN ('INCOMPLETO', 'INCONSISTENTE') AND clave LIKE 'EXP:%%' {filtro}""",
+                (id_egresado, *claves_incidencia))
 
-    def _marcar_no_vigentes(self, tabla, id_egresado, huellas):
-        """Lo que ya no aparece en el perfil no se borra: queda fuera del análisis y en el historial."""
+    def _marcar_no_vigentes(self, tabla, id_egresado, id_candidato, huellas):
+        """Lo que ya no aparece en el perfil no se borra: queda fuera del análisis y en el historial.
+
+        Solo se revisan las filas que provienen de capturas de este mismo perfil: las que llegaron
+        por la fusión de otra cuenta no dependen de lo que publique esta."""
         filtro = f"AND huella NOT IN ({', '.join(['%s'] * len(huellas))})" if huellas else ""
-        self._q(f"UPDATE {tabla} SET vigente_en_fuente = FALSE WHERE id_egresado = %s AND vigente_en_fuente {filtro}",
-                (id_egresado, *huellas))
+        self._q(f"""UPDATE {tabla} SET vigente_en_fuente = FALSE
+                     WHERE id_egresado = %s AND vigente_en_fuente {filtro}
+                       AND id_captura IN (SELECT id_captura FROM captura WHERE id_candidato = %s)""",
+                (id_egresado, *huellas, id_candidato))
 
     def _organizacion(self, x: dict) -> int:
         _ = self.reglas

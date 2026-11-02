@@ -60,7 +60,7 @@ CALL sp_probar('Captura de un titular en la lista de exclusión',
 CALL sp_probar('Captura con fecha futura',
   "INSERT INTO captura (id_candidato, id_ejecucion, codigo_canal, capturada_en, hash_contenido, expira_en, resultado) VALUES (@ca, @ej, 'ARCHIVO_PRUEBA', NOW() + INTERVAL 1 DAY, SHA2('f',256), CURDATE() + INTERVAL 90 DAY, 'NUEVO')");
 CALL sp_probar('Contenido de captura que no es JSON',
-  "INSERT INTO captura (id_candidato, id_ejecucion, codigo_canal, capturada_en, hash_contenido, contenido, expira_en) VALUES (@ca, @ej, 'ARCHIVO_PRUEBA', NOW(), SHA2('g',256), 'no-json', CURDATE() + INTERVAL 90 DAY, 'NUEVO')");
+  "INSERT INTO captura (id_candidato, id_ejecucion, codigo_canal, capturada_en, hash_contenido, contenido, expira_en, resultado) VALUES (@ca, @ej, 'ARCHIVO_PRUEBA', NOW() - INTERVAL 1 MINUTE, SHA2('g',256), 'no-json', CURDATE() + INTERVAL 90 DAY, 'NUEVO')");
 CALL sp_probar('Aceptado automáticamente con puntaje menor que 80',
   "UPDATE egresado SET puntaje_pertenencia = 70 WHERE id_egresado = @ea");
 CALL sp_probar('Por revisar con puntaje menor que 50',
@@ -99,7 +99,6 @@ CALL sp_probar('Sector CIIU inexistente',
 ROLLBACK;
 
 -- reiniciar los AUTO_INCREMENT
-SET @@system_versioning_alter_history = KEEP;
 ALTER TABLE ejecucion AUTO_INCREMENT = 1;
 ALTER TABLE candidato AUTO_INCREMENT = 1;
 ALTER TABLE captura AUTO_INCREMENT = 1;
@@ -107,7 +106,7 @@ ALTER TABLE egresado AUTO_INCREMENT = 1;
 ALTER TABLE organizacion AUTO_INCREMENT = 1;
 ALTER TABLE formacion AUTO_INCREMENT = 1;
 ALTER TABLE experiencia_laboral AUTO_INCREMENT = 1;
-SET @@system_versioning_alter_history = ERROR;
+ALTER TABLE historial_cambio AUTO_INCREMENT = 1;
 
 SELECT caso, resultado, LEFT(mensaje, 90) AS mensaje_base_de_datos FROM resultado_prueba;
 SELECT CONCAT(SUM(resultado = 'PASA'), ' de ', COUNT(*), ' pruebas superadas') AS resumen FROM resultado_prueba;

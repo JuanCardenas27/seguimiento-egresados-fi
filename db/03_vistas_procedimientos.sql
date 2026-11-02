@@ -154,32 +154,39 @@ SELECT i.codigo_tipo, t.severidad, i.estado, COUNT(*) AS incidencias
 -- 3. Detección de incidencias
 DELIMITER $$
 
+-- Se reúnen las detecciones en una tabla temporal y se registran con un solo upsert: si una
+-- incidencia ya estaba RESUELTA y el problema reaparece, se reabre (las DESCARTADAS no se tocan).
 CREATE PROCEDURE sp_detectar_incidencias(IN p_meses_vigencia INT)
 BEGIN
+  DROP TEMPORARY TABLE IF EXISTS tmp_incidencia;
+  CREATE TEMPORARY TABLE tmp_incidencia (
+    codigo_tipo VARCHAR(30), entidad VARCHAR(40), id_registro INT UNSIGNED, clave VARCHAR(60),
+    id_egresado INT UNSIGNED NULL, descripcion VARCHAR(500)) ENGINE=MEMORY;
+
   -- AMBIGUO: pertenencia no concluyente (cola de revisión manual)
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'AMBIGUO', 'egresado', e.id_egresado, e.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'AMBIGUO', 'egresado', e.id_egresado, 'POR_REVISAR', e.id_egresado,
          CONCAT('Pertenencia con puntaje ', e.puntaje_pertenencia, '/100: requiere revisión manual')
     FROM egresado e
    WHERE e.estado_verificacion = 'POR_REVISAR' AND e.estado_registro = 'ACTIVO';
 
   -- NO_VERIFICABLE: el programa de la Facultad no tiene años declarados
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'NO_VERIFICABLE', 'formacion', f.id_formacion, f.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'NO_VERIFICABLE', 'formacion', f.id_formacion, '', f.id_egresado,
          'Formación de la Facultad sin años: no se puede confirmar el grado ni la cohorte'
     FROM formacion f
-   WHERE f.es_facultad AND f.anio_fin IS NULL AND NOT f.en_curso;
+   WHERE f.es_facultad AND f.vigente_en_fuente AND f.anio_fin IS NULL AND NOT f.en_curso;
 
   -- NO_VERIFICABLE: el perfil dejó de estar disponible
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'NO_VERIFICABLE', 'egresado', e.id_egresado, e.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'NO_VERIFICABLE', 'egresado', e.id_egresado, 'NO_DISPONIBLE', e.id_egresado,
          'El perfil ya no está disponible en la fuente'
     FROM egresado e
    WHERE e.estado_registro = 'NO_DISPONIBLE';
 
   -- INCOMPLETO: cargo sin homologación completa
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'INCOMPLETO', 'experiencia_laboral', x.id_experiencia, x.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'INCOMPLETO', 'experiencia_laboral', x.id_experiencia, 'HOMOLOGACION', x.id_egresado,
          CONCAT('Cargo sin homologación completa: "', x.cargo_original, '" (falta ',
                 CONCAT_WS(', ', IF(x.codigo_ciuo IS NULL, 'ocupación CIUO', NULL),
                                 IF(x.codigo_nivel_cargo IS NULL, 'nivel', NULL),
@@ -189,78 +196,83 @@ BEGIN
      AND (x.codigo_ciuo IS NULL OR x.codigo_nivel_cargo IS NULL OR x.codigo_area IS NULL);
 
   -- INCOMPLETO: ubicación no reconocida
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'INCOMPLETO', 'experiencia_laboral', x.id_experiencia, x.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'INCOMPLETO', 'experiencia_laboral', x.id_experiencia, 'UBICACION', x.id_egresado,
          CONCAT('Ubicación no reconocida: "', COALESCE(x.ubicacion_original, 'sin dato'), '"')
     FROM experiencia_laboral x
    WHERE x.vigente_en_fuente AND x.codigo_pais IS NULL
      AND x.modalidad <> 'REMOTO';
 
   -- INCOMPLETO: organización sin sector CIIU
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, descripcion)
-  SELECT 'INCOMPLETO', 'organizacion', o.id_organizacion,
+  INSERT INTO tmp_incidencia
+  SELECT 'INCOMPLETO', 'organizacion', o.id_organizacion, 'CIIU', NULL,
          CONCAT('Organización sin sector CIIU: ', o.nombre_normalizado)
     FROM organizacion o
    WHERE o.codigo_seccion_ciiu IS NULL;
 
   -- DESACTUALIZADO: última captura más antigua que el periodo de vigencia
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'DESACTUALIZADO', 'egresado', e.id_egresado, e.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'DESACTUALIZADO', 'egresado', e.id_egresado, '', e.id_egresado,
          CONCAT('Última captura: ', DATE(e.ultima_captura_en), ' (',
                 DATEDIFF(CURDATE(), e.ultima_captura_en), ' días)')
     FROM egresado e
    WHERE e.estado_registro = 'ACTIVO'
      AND e.ultima_captura_en < NOW() - INTERVAL p_meses_vigencia MONTH;
 
-  -- DUPLICADO_POSIBLE: egresados
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'DUPLICADO_POSIBLE', 'egresado', d.id_egresado_b, d.id_egresado_b,
+  -- DUPLICADO_POSIBLE: egresados (una incidencia por pareja)
+  INSERT INTO tmp_incidencia
+  SELECT DISTINCT 'DUPLICADO_POSIBLE', 'egresado', d.id_egresado_b, CONCAT('DE:', d.id_egresado_a), d.id_egresado_b,
          CONCAT('Posible duplicado de id_egresado=', d.id_egresado_a, ' (', d.criterio,
                 ', mismo programa y cohorte)')
     FROM v_posibles_duplicados_egresado d;
 
-  -- DUPLICADO_POSIBLE: organizaciones
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, descripcion)
-  SELECT 'DUPLICADO_POSIBLE', 'organizacion', d.id_organizacion_b,
+  -- DUPLICADO_POSIBLE: organizaciones (una incidencia por pareja)
+  INSERT INTO tmp_incidencia
+  SELECT 'DUPLICADO_POSIBLE', 'organizacion', d.id_organizacion_b, CONCAT('DE:', d.id_organizacion_a), NULL,
          CONCAT('Posible duplicado de "', d.nombre_a, '" (clave ', d.clave, ')')
     FROM v_posibles_duplicados_organizacion d;
 
   -- INCONSISTENTE: tiempo completo 2 años antes de graduarse
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'INCONSISTENTE', 'experiencia_laboral', x.id_experiencia, x.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'INCONSISTENTE', 'experiencia_laboral', x.id_experiencia, '', x.id_egresado,
          CONCAT('Empleo de tiempo completo desde ', x.fecha_inicio,
                 ', más de 2 años antes de finalizar el programa (', g.primer_fin, ')')
     FROM experiencia_laboral x
     JOIN (SELECT id_egresado, MIN(anio_fin) AS primer_fin
-            FROM formacion WHERE es_facultad AND anio_fin IS NOT NULL
+            FROM formacion WHERE es_facultad AND vigente_en_fuente AND anio_fin IS NOT NULL
            GROUP BY id_egresado) g ON g.id_egresado = x.id_egresado
    WHERE x.vigente_en_fuente AND x.tipo_vinculo = 'TIEMPO_COMPLETO'
      AND YEAR(x.fecha_inicio) < g.primer_fin - 2;
 
   -- INCONSISTENTE: más de dos experiencias actuales simultáneas
-  INSERT IGNORE INTO incidencia_calidad (codigo_tipo, entidad, id_registro, id_egresado, descripcion)
-  SELECT 'INCONSISTENTE', 'egresado', x.id_egresado, x.id_egresado,
+  INSERT INTO tmp_incidencia
+  SELECT 'INCONSISTENTE', 'egresado', x.id_egresado, 'ACTUALES', x.id_egresado,
          CONCAT(COUNT(*), ' experiencias marcadas como actuales')
     FROM experiencia_laboral x
    WHERE x.es_actual AND x.vigente_en_fuente
    GROUP BY x.id_egresado
   HAVING COUNT(*) > 2;
 
-  -- Cierra las incidencias que ya no aplican
-  UPDATE incidencia_calidad i
-    JOIN experiencia_laboral x ON i.entidad = 'experiencia_laboral' AND x.id_experiencia = i.id_registro
-     SET i.estado = 'RESUELTA', i.resuelta_en = CURRENT_TIMESTAMP, i.resuelta_por = 'sistema'
-   WHERE i.codigo_tipo = 'INCOMPLETO' AND i.estado = 'ABIERTA'
-     AND x.codigo_ciuo IS NOT NULL AND x.codigo_nivel_cargo IS NOT NULL AND x.codigo_area IS NOT NULL
-     AND (x.codigo_pais IS NOT NULL OR x.modalidad = 'REMOTO');
+  INSERT INTO incidencia_calidad (codigo_tipo, entidad, id_registro, clave, id_egresado, descripcion)
+  SELECT codigo_tipo, entidad, id_registro, clave, id_egresado, descripcion FROM tmp_incidencia
+  ON DUPLICATE KEY UPDATE
+     descripcion  = VALUES(descripcion),
+     detectada_en = IF(estado = 'RESUELTA', CURRENT_TIMESTAMP, detectada_en),
+     resuelta_en  = IF(estado = 'RESUELTA', NULL, resuelta_en),
+     resuelta_por = IF(estado = 'RESUELTA', NULL, resuelta_por),
+     estado       = IF(estado = 'RESUELTA', 'ABIERTA', estado);
 
+  -- Cierra las incidencias de este procedimiento que ya no aplican. Las que registra el proceso en
+  -- Python (clave 'EXP:...' y 'PERTENENCIA_NO_CONFIRMADA') las cierra el propio proceso o un analista.
   UPDATE incidencia_calidad i
-    JOIN egresado e ON i.entidad = 'egresado' AND e.id_egresado = i.id_registro
      SET i.estado = 'RESUELTA', i.resuelta_en = CURRENT_TIMESTAMP, i.resuelta_por = 'sistema'
    WHERE i.estado = 'ABIERTA'
-     AND ((i.codigo_tipo = 'DESACTUALIZADO' AND e.ultima_captura_en >= NOW() - INTERVAL p_meses_vigencia MONTH)
-       OR (i.codigo_tipo = 'AMBIGUO'        AND e.estado_verificacion = 'ACEPTADO'));
+     AND i.clave NOT LIKE 'EXP:%' AND i.clave <> 'PERTENENCIA_NO_CONFIRMADA'
+     AND NOT EXISTS (SELECT 1 FROM tmp_incidencia t
+                      WHERE t.codigo_tipo = i.codigo_tipo AND t.entidad = i.entidad
+                        AND t.id_registro = i.id_registro AND t.clave = i.clave);
 
+  DROP TEMPORARY TABLE tmp_incidencia;
   SELECT * FROM v_resumen_calidad ORDER BY FIELD(severidad,'ALTA','MEDIA','BAJA'), codigo_tipo, estado;
 END$$
 
@@ -287,7 +299,8 @@ BEGIN
      WHERE id_egresado = p_origen;
     UPDATE incidencia_calidad
        SET estado = 'RESUELTA', resuelta_en = CURRENT_TIMESTAMP, resuelta_por = p_responsable
-     WHERE codigo_tipo = 'DUPLICADO_POSIBLE' AND entidad = 'egresado' AND id_registro = p_origen;
+     WHERE codigo_tipo = 'DUPLICADO_POSIBLE' AND entidad = 'egresado' AND estado = 'ABIERTA'
+       AND (id_registro = p_origen OR (id_registro = p_destino AND clave = CONCAT('DE:', p_origen)));
     UPDATE incidencia_calidad
        SET estado = 'DESCARTADA', resuelta_en = CURRENT_TIMESTAMP, resuelta_por = p_responsable
      WHERE id_egresado = p_origen AND estado = 'ABIERTA';
@@ -312,6 +325,8 @@ BEGIN
     DELETE FROM incidencia_calidad  WHERE id_egresado = p_id_egresado;
     DELETE FROM experiencia_laboral WHERE id_egresado = p_id_egresado;
     DELETE FROM formacion           WHERE id_egresado = p_id_egresado;
+    -- después de los DELETE, que también dejan su versión en el historial
+    DELETE FROM historial_cambio    WHERE id_egresado = p_id_egresado;
     DELETE FROM egresado            WHERE id_egresado = p_id_egresado;
     UPDATE captura   SET contenido = NULL WHERE id_candidato = v_cand;
     UPDATE candidato SET id_publico_linkedin = NULL, estado = 'EXCLUIDO', motivo_estado = 'SUPRESION'

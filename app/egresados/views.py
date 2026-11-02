@@ -2,6 +2,7 @@ from django.db import connections
 from django.db.models import Prefetch
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -13,6 +14,14 @@ from .serializers import (EgresadoDetalleSerializer, EgresadoListaSerializer, Ej
 TAMANO_MINIMO_CELDA = 5
 
 
+def _entero(valor: str, nombre: str) -> int:
+    """Parámetro numérico de la consulta; si no lo es, responde 400 en lugar de un error 500."""
+    try:
+        return int(valor)
+    except ValueError:
+        raise ValidationError({nombre: "Debe ser un número entero."}) from None
+
+
 class EgresadoViewSet(viewsets.ReadOnlyModelViewSet):
     """Egresados verificados con su trayectoria (requiere autenticación)."""
 
@@ -21,11 +30,16 @@ class EgresadoViewSet(viewsets.ReadOnlyModelViewSet):
             Prefetch("formaciones", queryset=Formacion.objects.select_related("programa")),
             Prefetch("experiencias", queryset=ExperienciaLaboral.objects.select_related("organizacion")),
         )
-        qs = qs.filter(estado_verificacion=self.request.query_params.get("estado", "ACEPTADO"))
-        if programa := self.request.query_params.get("programa"):
-            qs = qs.filter(formaciones__programa_id=programa, formaciones__es_facultad=True)
-        if cohorte := self.request.query_params.get("cohorte"):
-            qs = qs.filter(formaciones__anio_fin=cohorte, formaciones__es_facultad=True)
+        params = self.request.query_params
+        qs = qs.filter(estado_verificacion=params.get("estado", "ACEPTADO"))
+        # programa y cohorte se evalúan sobre la misma formación (un solo filter sobre la relación)
+        filtro_formacion = {}
+        if programa := params.get("programa"):
+            filtro_formacion["formaciones__programa_id"] = _entero(programa, "programa")
+        if cohorte := params.get("cohorte"):
+            filtro_formacion["formaciones__anio_fin"] = _entero(cohorte, "cohorte")
+        if filtro_formacion:
+            qs = qs.filter(formaciones__es_facultad=True, formaciones__vigente_en_fuente=True, **filtro_formacion)
         return qs.distinct()
 
     def get_serializer_class(self):

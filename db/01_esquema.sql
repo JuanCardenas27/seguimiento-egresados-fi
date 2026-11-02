@@ -292,6 +292,7 @@ CREATE TABLE formacion (
   anio_fin            SMALLINT UNSIGNED NULL COMMENT 'Año de finalización declarado (aproxima la cohorte)',
   en_curso            BOOLEAN      NOT NULL DEFAULT FALSE,
   vigente_en_fuente   BOOLEAN      NOT NULL DEFAULT TRUE COMMENT 'FALSE si desapareció del perfil',
+  version_desde       TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'Inicio de la versión vigente',
   CONSTRAINT uq_formacion_huella UNIQUE (id_egresado, huella),
   CONSTRAINT fk_form_egresado FOREIGN KEY (id_egresado)  REFERENCES egresado(id_egresado),
   CONSTRAINT fk_form_captura  FOREIGN KEY (id_captura)   REFERENCES captura(id_captura),
@@ -302,7 +303,7 @@ CREATE TABLE formacion (
   CONSTRAINT ck_form_rango    CHECK ((anio_inicio IS NULL OR anio_inicio BETWEEN 1940 AND 2100)
                                  AND (anio_fin    IS NULL OR anio_fin    BETWEEN 1940 AND 2100)),
   CONSTRAINT ck_form_huella   CHECK (huella REGEXP '^[0-9a-f]{40}$')
-) ENGINE=InnoDB WITH SYSTEM VERSIONING COMMENT='Formación académica declarada';
+) ENGINE=InnoDB COMMENT='Formación académica declarada (versiones anteriores en historial_cambio)';
 
 CREATE TABLE organizacion (
   id_organizacion       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -348,6 +349,7 @@ CREATE TABLE experiencia_laboral (
   codigo_municipio   CHAR(5)      NULL COMMENT 'Solo si codigo_pais = CO',
   ciudad_extranjera  VARCHAR(100) NULL COMMENT 'Solo si codigo_pais <> CO',
   vigente_en_fuente  BOOLEAN      NOT NULL DEFAULT TRUE COMMENT 'FALSE si desapareció del perfil',
+  version_desde      TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'Inicio de la versión vigente',
   CONSTRAINT uq_exp_huella   UNIQUE (id_egresado, huella),
   CONSTRAINT fk_exp_egresado FOREIGN KEY (id_egresado)        REFERENCES egresado(id_egresado),
   CONSTRAINT fk_exp_org      FOREIGN KEY (id_organizacion)    REFERENCES organizacion(id_organizacion),
@@ -364,7 +366,24 @@ CREATE TABLE experiencia_laboral (
   CONSTRAINT ck_exp_geo_ext  CHECK (ciudad_extranjera IS NULL OR (codigo_pais IS NOT NULL AND codigo_pais <> 'CO')),
   CONSTRAINT ck_exp_huella   CHECK (huella REGEXP '^[0-9a-f]{40}$'),
   INDEX ix_exp_actual (id_egresado, es_actual)
-) ENGINE=InnoDB WITH SYSTEM VERSIONING COMMENT='Experiencias laborales consolidadas';
+) ENGINE=InnoDB COMMENT='Experiencias laborales consolidadas (versiones anteriores en historial_cambio)';
+
+-- Versiones anteriores de formación y experiencia. Se usa una tabla propia en lugar de SYSTEM VERSIONING
+-- porque MariaDB no permite borrar el historial de filas concretas, y la supresión (Ley 1581) lo exige.
+CREATE TABLE historial_cambio (
+  id_historial     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tabla            ENUM('formacion','experiencia_laboral') NOT NULL,
+  id_registro      INT UNSIGNED NOT NULL COMMENT 'id_formacion o id_experiencia',
+  id_egresado      INT UNSIGNED NOT NULL COMMENT 'Egresado al que pertenecía la versión',
+  operacion        ENUM('UPDATE','DELETE') NOT NULL,
+  version_anterior JSON         NOT NULL,
+  vigente_desde    TIMESTAMP(6) NOT NULL,
+  vigente_hasta    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT ck_hist_json CHECK (JSON_VALID(version_anterior)),
+  INDEX ix_hist_registro (tabla, id_registro, vigente_desde),
+  INDEX ix_hist_egresado (id_egresado),
+  INDEX ix_hist_fecha (vigente_hasta)
+) ENGINE=InnoDB COMMENT='Historial de versiones (trazabilidad)';
 
 -- 5. Calidad
 
@@ -373,13 +392,14 @@ CREATE TABLE incidencia_calidad (
   codigo_tipo    VARCHAR(30)  NOT NULL,
   entidad        VARCHAR(40)  NOT NULL COMMENT 'Tabla afectada',
   id_registro    INT UNSIGNED NOT NULL COMMENT 'Llave del registro afectado',
+  clave          VARCHAR(60)  NOT NULL DEFAULT '' COMMENT 'Distingue incidencias del mismo tipo sobre el mismo registro',
   id_egresado    INT UNSIGNED NULL,
   descripcion    VARCHAR(500) NOT NULL,
   estado         ENUM('ABIERTA','EN_REVISION','RESUELTA','DESCARTADA') NOT NULL DEFAULT 'ABIERTA',
   detectada_en   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   resuelta_en    TIMESTAMP    NULL,
   resuelta_por   VARCHAR(60)  NULL,
-  CONSTRAINT uq_incidencia UNIQUE (codigo_tipo, entidad, id_registro),
+  CONSTRAINT uq_incidencia UNIQUE (codigo_tipo, entidad, id_registro, clave),
   CONSTRAINT fk_inc_tipo     FOREIGN KEY (codigo_tipo) REFERENCES cat_tipo_incidencia(codigo),
   CONSTRAINT fk_inc_egresado FOREIGN KEY (id_egresado) REFERENCES egresado(id_egresado) ON DELETE SET NULL,
   CONSTRAINT ck_inc_cierre   CHECK (estado NOT IN ('RESUELTA','DESCARTADA') OR resuelta_por IS NOT NULL),
@@ -388,6 +408,32 @@ CREATE TABLE incidencia_calidad (
 
 -- 6. Triggers
 DELIMITER $$
+
+-- Fotografía de una versión (JSON) para el historial; también sirve para saber si la fila cambió
+CREATE FUNCTION fn_version_formacion(p_id_egresado INT UNSIGNED, p_id_captura INT UNSIGNED, p_huella CHAR(40),
+    p_institucion VARCHAR(200), p_titulo VARCHAR(200), p_campo VARCHAR(200), p_es_facultad BOOLEAN,
+    p_id_programa SMALLINT UNSIGNED, p_codigo_nivel VARCHAR(20), p_anio_inicio SMALLINT UNSIGNED,
+    p_anio_fin SMALLINT UNSIGNED, p_en_curso BOOLEAN, p_vigente BOOLEAN)
+RETURNS LONGTEXT DETERMINISTIC NO SQL
+RETURN JSON_OBJECT('id_egresado', p_id_egresado, 'id_captura', p_id_captura, 'huella', p_huella,
+                   'institucion_original', p_institucion, 'titulo_original', p_titulo, 'campo_original', p_campo,
+                   'es_facultad', p_es_facultad, 'id_programa', p_id_programa, 'codigo_nivel', p_codigo_nivel,
+                   'anio_inicio', p_anio_inicio, 'anio_fin', p_anio_fin, 'en_curso', p_en_curso,
+                   'vigente_en_fuente', p_vigente)$$
+
+CREATE FUNCTION fn_version_experiencia(p_id_egresado INT UNSIGNED, p_id_organizacion INT UNSIGNED,
+    p_id_captura INT UNSIGNED, p_huella CHAR(40), p_cargo VARCHAR(200), p_ciuo VARCHAR(4), p_nivel VARCHAR(20),
+    p_area VARCHAR(30), p_metodo VARCHAR(20), p_vinculo VARCHAR(20), p_modalidad VARCHAR(20), p_inicio DATE,
+    p_prec_inicio VARCHAR(4), p_fin DATE, p_prec_fin VARCHAR(4), p_actual BOOLEAN, p_ubicacion VARCHAR(150),
+    p_pais CHAR(2), p_municipio CHAR(5), p_ciudad VARCHAR(100), p_vigente BOOLEAN)
+RETURNS LONGTEXT DETERMINISTIC NO SQL
+RETURN JSON_OBJECT('id_egresado', p_id_egresado, 'id_organizacion', p_id_organizacion, 'id_captura', p_id_captura,
+                   'huella', p_huella, 'cargo_original', p_cargo, 'codigo_ciuo', p_ciuo,
+                   'codigo_nivel_cargo', p_nivel, 'codigo_area', p_area, 'metodo_clasificacion', p_metodo,
+                   'tipo_vinculo', p_vinculo, 'modalidad', p_modalidad, 'fecha_inicio', p_inicio,
+                   'precision_inicio', p_prec_inicio, 'fecha_fin', p_fin, 'precision_fin', p_prec_fin,
+                   'es_actual', p_actual, 'ubicacion_original', p_ubicacion, 'codigo_pais', p_pais,
+                   'codigo_municipio', p_municipio, 'ciudad_extranjera', p_ciudad, 'vigente_en_fuente', p_vigente)$$
 
 -- No capturar perfiles de la lista de exclusión
 CREATE TRIGGER trg_captura_validar_bi BEFORE INSERT ON captura
@@ -420,6 +466,66 @@ BEGIN
   IF NEW.fecha_inicio > CURDATE() OR (NEW.fecha_fin IS NOT NULL AND NEW.fecha_fin > CURDATE()) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'experiencia_laboral: fechas futuras no permitidas';
   END IF;
+  IF BINARY fn_version_experiencia(OLD.id_egresado, OLD.id_organizacion, OLD.id_captura, OLD.huella, OLD.cargo_original,
+        OLD.codigo_ciuo, OLD.codigo_nivel_cargo, OLD.codigo_area, OLD.metodo_clasificacion, OLD.tipo_vinculo,
+        OLD.modalidad, OLD.fecha_inicio, OLD.precision_inicio, OLD.fecha_fin, OLD.precision_fin, OLD.es_actual,
+        OLD.ubicacion_original, OLD.codigo_pais, OLD.codigo_municipio, OLD.ciudad_extranjera, OLD.vigente_en_fuente)
+     <> BINARY fn_version_experiencia(NEW.id_egresado, NEW.id_organizacion, NEW.id_captura, NEW.huella, NEW.cargo_original,
+        NEW.codigo_ciuo, NEW.codigo_nivel_cargo, NEW.codigo_area, NEW.metodo_clasificacion, NEW.tipo_vinculo,
+        NEW.modalidad, NEW.fecha_inicio, NEW.precision_inicio, NEW.fecha_fin, NEW.precision_fin, NEW.es_actual,
+        NEW.ubicacion_original, NEW.codigo_pais, NEW.codigo_municipio, NEW.ciudad_extranjera, NEW.vigente_en_fuente) THEN
+    -- la versión anterior pasa al historial
+    INSERT INTO historial_cambio (tabla, id_registro, id_egresado, operacion, version_anterior, vigente_desde)
+    VALUES ('experiencia_laboral', OLD.id_experiencia, OLD.id_egresado, 'UPDATE',
+            fn_version_experiencia(OLD.id_egresado, OLD.id_organizacion, OLD.id_captura, OLD.huella, OLD.cargo_original,
+              OLD.codigo_ciuo, OLD.codigo_nivel_cargo, OLD.codigo_area, OLD.metodo_clasificacion, OLD.tipo_vinculo,
+              OLD.modalidad, OLD.fecha_inicio, OLD.precision_inicio, OLD.fecha_fin, OLD.precision_fin, OLD.es_actual,
+              OLD.ubicacion_original, OLD.codigo_pais, OLD.codigo_municipio, OLD.ciudad_extranjera, OLD.vigente_en_fuente),
+            OLD.version_desde);
+    SET NEW.version_desde = CURRENT_TIMESTAMP(6);
+  END IF;
+END$$
+
+CREATE TRIGGER trg_exp_historial_ad AFTER DELETE ON experiencia_laboral
+FOR EACH ROW
+BEGIN
+  INSERT INTO historial_cambio (tabla, id_registro, id_egresado, operacion, version_anterior, vigente_desde)
+  VALUES ('experiencia_laboral', OLD.id_experiencia, OLD.id_egresado, 'DELETE',
+          fn_version_experiencia(OLD.id_egresado, OLD.id_organizacion, OLD.id_captura, OLD.huella, OLD.cargo_original,
+            OLD.codigo_ciuo, OLD.codigo_nivel_cargo, OLD.codigo_area, OLD.metodo_clasificacion, OLD.tipo_vinculo,
+            OLD.modalidad, OLD.fecha_inicio, OLD.precision_inicio, OLD.fecha_fin, OLD.precision_fin, OLD.es_actual,
+            OLD.ubicacion_original, OLD.codigo_pais, OLD.codigo_municipio, OLD.ciudad_extranjera, OLD.vigente_en_fuente),
+          OLD.version_desde);
+END$$
+
+CREATE TRIGGER trg_form_historial_bu BEFORE UPDATE ON formacion
+FOR EACH ROW
+BEGIN
+  IF BINARY fn_version_formacion(OLD.id_egresado, OLD.id_captura, OLD.huella, OLD.institucion_original, OLD.titulo_original,
+        OLD.campo_original, OLD.es_facultad, OLD.id_programa, OLD.codigo_nivel, OLD.anio_inicio, OLD.anio_fin,
+        OLD.en_curso, OLD.vigente_en_fuente)
+     <> BINARY fn_version_formacion(NEW.id_egresado, NEW.id_captura, NEW.huella, NEW.institucion_original, NEW.titulo_original,
+        NEW.campo_original, NEW.es_facultad, NEW.id_programa, NEW.codigo_nivel, NEW.anio_inicio, NEW.anio_fin,
+        NEW.en_curso, NEW.vigente_en_fuente) THEN
+    INSERT INTO historial_cambio (tabla, id_registro, id_egresado, operacion, version_anterior, vigente_desde)
+    VALUES ('formacion', OLD.id_formacion, OLD.id_egresado, 'UPDATE',
+            fn_version_formacion(OLD.id_egresado, OLD.id_captura, OLD.huella, OLD.institucion_original, OLD.titulo_original,
+              OLD.campo_original, OLD.es_facultad, OLD.id_programa, OLD.codigo_nivel, OLD.anio_inicio, OLD.anio_fin,
+              OLD.en_curso, OLD.vigente_en_fuente),
+            OLD.version_desde);
+    SET NEW.version_desde = CURRENT_TIMESTAMP(6);
+  END IF;
+END$$
+
+CREATE TRIGGER trg_form_historial_ad AFTER DELETE ON formacion
+FOR EACH ROW
+BEGIN
+  INSERT INTO historial_cambio (tabla, id_registro, id_egresado, operacion, version_anterior, vigente_desde)
+  VALUES ('formacion', OLD.id_formacion, OLD.id_egresado, 'DELETE',
+          fn_version_formacion(OLD.id_egresado, OLD.id_captura, OLD.huella, OLD.institucion_original, OLD.titulo_original,
+            OLD.campo_original, OLD.es_facultad, OLD.id_programa, OLD.codigo_nivel, OLD.anio_inicio, OLD.anio_fin,
+            OLD.en_curso, OLD.vigente_en_fuente),
+          OLD.version_desde);
 END$$
 
 CREATE TRIGGER trg_form_validar_bi BEFORE INSERT ON formacion
@@ -441,3 +547,9 @@ CREATE EVENT ev_purgar_capturas
   ON SCHEDULE EVERY 1 DAY STARTS (CURRENT_DATE + INTERVAL 1 DAY + INTERVAL 2 HOUR)
   COMMENT 'Elimina el contenido de las capturas vencidas'
   DO UPDATE captura SET contenido = NULL WHERE expira_en <= CURDATE() AND contenido IS NOT NULL;
+
+-- 8. Depuración del historial: se conservan como máximo cinco años
+CREATE EVENT ev_purgar_historial
+  ON SCHEDULE EVERY 1 MONTH STARTS (CURRENT_DATE + INTERVAL 1 DAY + INTERVAL 3 HOUR)
+  COMMENT 'Elimina las versiones con más de cinco años'
+  DO DELETE FROM historial_cambio WHERE vigente_hasta < NOW() - INTERVAL 5 YEAR;

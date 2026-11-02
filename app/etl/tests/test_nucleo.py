@@ -162,6 +162,36 @@ class PruebasVerificacion(unittest.TestCase):
         self.assertEqual(r.criterios["institucion"], 10)
         self.assertEqual(r.decision, "POR_REVISAR")
 
+    @staticmethod
+    def _unal(titulo, campo, pagina=True):
+        return minimizar({"ubicacion": "Bogotá, Colombia", "educacion": [{
+            "institucion": "Universidad Nacional de Colombia", "titulo": titulo, "campo": campo,
+            "url_institucion": "https://www.linkedin.com/school/universidad-nacional-de-colombia/" if pagina else None,
+            "inicio": "2010", "fin": "2015"}]})
+
+    def test_programas_de_otras_facultades_no_se_aceptan(self):
+        # coinciden con el patrón de un programa de la Facultad, pero no son ingeniería
+        for titulo, campo in (("Diseñador Industrial", "Diseño Industrial"), ("Químico", "Química"),
+                              ("Profesional", "Ciencias de la Computación")):
+            r = evaluar(self._unal(titulo, campo), REGLAS, HOY)
+            self.assertNotEqual(r.decision, "ACEPTADO", campo)
+            self.assertEqual(r.criterios["programa"], 0, campo)
+
+    def test_otra_facultad_sin_relacion_con_ingenieria_se_excluye(self):
+        r = evaluar(self._unal("Economista", "Economía"), REGLAS, HOY)
+        self.assertEqual((r.decision, r.motivo), ("EXCLUIDO", "OTRA_FACULTAD"))
+
+    def test_canal_a_infiere_el_programa_de_la_consulta(self):
+        consulta = 'site:linkedin.com/in "Universidad Nacional de Colombia" "Ingeniería Civil"'
+        perfil = self._unal(None, None)
+        sin_pista = evaluar(perfil, REGLAS, HOY)
+        con_pista = evaluar(perfil, REGLAS, HOY, consulta)
+        self.assertEqual(sin_pista.decision, "POR_REVISAR")
+        self.assertEqual(con_pista.decision, "ACEPTADO")
+        self.assertEqual(con_pista.formaciones[0].id_programa, 2)
+        # la pista no reemplaza un título que sí está en el perfil
+        self.assertEqual(evaluar(self._unal("Economista", "Economía"), REGLAS, HOY, consulta).decision, "EXCLUIDO")
+
 
 if __name__ == "__main__":
     unittest.main()

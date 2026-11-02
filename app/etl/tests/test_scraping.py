@@ -3,8 +3,8 @@ import os
 import unittest
 from unittest import mock
 
-from etl.conectores.base import PerfilNoDisponible
-from etl.conectores.scraping import ExtractorScraping, analizar_html, es_muro
+from etl.conectores.base import FuenteBloqueada, PerfilNoDisponible, PerfilRestringido
+from etl.conectores.scraping import MUROS_PARA_DETENER, ExtractorScraping, analizar_html, es_muro
 from etl.nucleo.perfil import minimizar
 
 PAGINA = """<html><head>
@@ -48,6 +48,46 @@ class AnalizadorTest(unittest.TestCase):
         self.assertTrue(es_muro("https://www.linkedin.com/authwall?trk=x", ""))
         self.assertTrue(es_muro("https://www.linkedin.com/in/x/", '<div class="g-recaptcha"></div>'))
         self.assertFalse(es_muro("https://www.linkedin.com/in/x/", PAGINA))
+
+
+class CargoTest(unittest.TestCase):
+    def test_cargo_actual_solo_para_el_empleo_vigente(self):
+        pagina = """<script type="application/ld+json">{"@type": "Person", "givenName": "P", "jobTitle": "Gerente",
+          "worksFor": [{"name": "Actual S.A.S.", "member": {"startDate": "2020"}},
+                       {"name": "Anterior S.A.S.", "member": {"startDate": "2015", "endDate": "2019"}}]}</script>"""
+        perfil = minimizar(analizar_html(pagina, "p-fict"))
+        self.assertEqual([(x["empresa"], x["cargo"]) for x in perfil["experiencia"]], [("Actual S.A.S.", "Gerente")])
+
+
+class MurosTest(unittest.TestCase):
+    def setUp(self):
+        with mock.patch.dict(os.environ, {"ETL_SCRAPING_CONTACTO": "egresados@ejemplo.edu.co"}):
+            self.extractor = ExtractorScraping(pausa=(0, 0))
+
+    def test_muro_aislado_es_perfil_restringido(self):
+        with mock.patch.object(self.extractor, "_descargar", return_value=("https://www.linkedin.com/authwall", "")):
+            with self.assertRaises(PerfilRestringido):
+                self.extractor.obtener("a-fict")
+
+    def test_muros_seguidos_detienen_la_extraccion(self):
+        with mock.patch.object(self.extractor, "_descargar", return_value=("https://www.linkedin.com/authwall", "")):
+            for _ in range(MUROS_PARA_DETENER - 1):
+                with self.assertRaises(PerfilRestringido):
+                    self.extractor.obtener("a-fict")
+            with self.assertRaises(FuenteBloqueada):
+                self.extractor.obtener("a-fict")
+
+    def test_una_lectura_exitosa_reinicia_el_conteo(self):
+        muro = ("https://www.linkedin.com/authwall", "")
+        ok = ("https://www.linkedin.com/in/x/", PAGINA)
+        respuestas = [muro] * (MUROS_PARA_DETENER - 1) + [ok, muro]
+        with mock.patch.object(self.extractor, "_descargar", side_effect=respuestas):
+            for _ in range(MUROS_PARA_DETENER - 1):
+                with self.assertRaises(PerfilRestringido):
+                    self.extractor.obtener("a-fict")
+            self.extractor.obtener("x-fict")
+            with self.assertRaises(PerfilRestringido):
+                self.extractor.obtener("a-fict")
 
 
 class IdentificacionTest(unittest.TestCase):

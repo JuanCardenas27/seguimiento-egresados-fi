@@ -88,9 +88,16 @@ SELECT estado_verificacion, COUNT(*) AS perfiles, ROUND(AVG(puntaje_pertenencia)
 SELECT estado, motivo_estado, COUNT(*) AS candidatos
   FROM candidato GROUP BY estado, motivo_estado;
 
--- P12. Trazabilidad: historial completo de una experiencia (SYSTEM VERSIONING)
-SELECT id_experiencia, cargo_original, codigo_ciuo, codigo_nivel_cargo, codigo_area, id_captura,
-       ROW_START AS vigente_desde, ROW_END AS vigente_hasta
-  FROM experiencia_laboral FOR SYSTEM_TIME ALL
+-- P12. Trazabilidad: historial completo de una experiencia (versión vigente y anteriores)
+SELECT 'VIGENTE' AS version, id_experiencia, cargo_original, codigo_ciuo, codigo_nivel_cargo, codigo_area,
+       id_captura, version_desde AS vigente_desde, NULL AS vigente_hasta
+  FROM experiencia_laboral
  WHERE id_experiencia = 1
- ORDER BY ROW_START;
+UNION ALL
+SELECT h.operacion, h.id_registro,
+       JSON_VALUE(h.version_anterior, '$.cargo_original'), JSON_VALUE(h.version_anterior, '$.codigo_ciuo'),
+       JSON_VALUE(h.version_anterior, '$.codigo_nivel_cargo'), JSON_VALUE(h.version_anterior, '$.codigo_area'),
+       JSON_VALUE(h.version_anterior, '$.id_captura'), h.vigente_desde, h.vigente_hasta
+  FROM historial_cambio h
+ WHERE h.tabla = 'experiencia_laboral' AND h.id_registro = 1
+ ORDER BY vigente_desde;
