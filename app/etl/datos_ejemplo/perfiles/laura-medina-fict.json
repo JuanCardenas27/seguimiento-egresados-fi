@@ -1,0 +1,14 @@
+{
+  "id_publico": "laura-medina-fict",
+  "nombres": "Laura",
+  "apellidos": "Medina",
+  "ubicacion": "Medellín, Antioquia, Colombia",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia - Sede Medellín", "titulo": "Ingeniera Civil", "campo": "Facultad de Minas",
+     "inicio": "2012", "fin": "2017"}
+  ],
+  "experiencia": [
+    {"cargo": "Ingeniera estructural", "empresa": "Estructuras del Ejemplo S.A.S.", "ubicacion": "Medellín, Antioquia, Colombia",
+     "inicio": "2018-01", "fin": null}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id_publico": "julian-moreno-diaz-fict",
+  "nombres": "Julián",
+  "apellidos": "Moreno Díaz",
+  "ubicacion": "Bogotá, D.C., Colombia",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia", "titulo": "Ingeniero Industrial", "campo": null, "inicio": null, "fin": null}
+  ],
+  "experiencia": [
+    {"cargo": "Key Account Associate", "empresa": "DATALITICA COLOMBIA", "tipo_empleo": "Full-time",
+     "ubicacion": "Bogotá, D.C., Colombia", "inicio": "May 2019", "fin": "Present"},
+    {"cargo": "Analista de operaciones logísticas", "empresa": "Logística Andina S.A.S.",
+     "url_empresa": "https://www.linkedin.com/company/logistica-andina-fict/",
+     "industria_empresa": "Transportation, Logistics, Supply Chain and Storage", "tipo_empresa": "Privately Held",
+     "tipo_empleo": "Full-time", "ubicacion": "Área metropolitana de Bogotá", "inicio": "Aug 2016", "fin": "Apr 2019"}
+  ]
+}

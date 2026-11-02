@@ -1,0 +1,18 @@
+{
+  "_capturado_en": "2024-03-15T09:30:00",
+  "id_publico": "daniela-torres-vargas-fict",
+  "urn": "urn:li:member:FICT0005",
+  "nombres": "Daniela",
+  "apellidos": "Torres Vargas",
+  "ubicacion": "Bogotá, D.C., Colombia",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia", "url_institucion": "https://www.linkedin.com/school/universidad-nacional-de-colombia/",
+     "titulo": "Ingeniera Electricista", "campo": "Ingeniería Eléctrica", "inicio": "2012", "fin": "2017"}
+  ],
+  "experiencia": [
+    {"cargo": "Ingeniera de subestaciones eléctricas", "empresa": "Energía del Ejemplo S.A. E.S.P.",
+     "url_empresa": "https://www.linkedin.com/company/energia-ejemplo-fict/", "industria_empresa": "Utilities",
+     "tipo_empresa": "Public Company", "tipo_empleo": "Full-time", "modalidad": "On-site",
+     "ubicacion": "Bogotá, D.C., Colombia", "inicio": "2018-03", "fin": null}
+  ]
+}

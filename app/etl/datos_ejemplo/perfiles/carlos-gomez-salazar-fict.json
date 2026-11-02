@@ -1,0 +1,23 @@
+{
+  "id_publico": "carlos-gomez-salazar-fict",
+  "urn": "urn:li:member:FICT0002",
+  "nombres": "Carlos Andrés",
+  "apellidos": "Gómez Salazar",
+  "ubicacion": "Bogotá, D.C., Colombia",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia", "titulo": "Ingeniero Civil", "campo": "Ingeniería Civil",
+     "inicio": "2010", "fin": "2015"},
+    {"institucion": "Universidad del Ejemplo", "titulo": "Especialización en Gerencia de Proyectos", "campo": "Gerencia de proyectos",
+     "inicio": "2017", "fin": "2018"}
+  ],
+  "experiencia": [
+    {"cargo": "Director de proyectos de infraestructura vial", "empresa": "Instituto de Desarrollo Urbano del Ejemplo",
+     "url_empresa": "https://www.linkedin.com/company/idu-ejemplo-fict/", "industria_empresa": "Government Administration",
+     "tipo_empresa": "Government Agency", "tipo_empleo": "Full-time", "modalidad": "On-site",
+     "ubicacion": "Bogotá, D.C., Colombia", "inicio": "2017-01", "fin": null},
+    {"cargo": "Ingeniero residente de obra", "empresa": "Constructora Vial del Centro SAS",
+     "url_empresa": "https://www.linkedin.com/company/constructora-vial-centro-fict/", "industria_empresa": "Civil Engineering",
+     "tipo_empresa": "Privately Held", "tipo_empleo": "Full-time", "modalidad": "On-site",
+     "ubicacion": "Villavicencio, Meta, Colombia", "inicio": "2012-02", "fin": "2016-12"}
+  ]
+}

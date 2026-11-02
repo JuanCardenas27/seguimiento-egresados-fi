@@ -1,0 +1,13 @@
+{
+  "id_publico": "mariana-castillo-ortiz-fict",
+  "nombres": "Mariana",
+  "apellidos": "Castillo Ortiz",
+  "ubicacion": "Bogotá, D.C., Colombia",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia", "url_institucion": "https://www.linkedin.com/school/universidad-nacional-de-colombia/",
+     "titulo": "Ingeniería Electrónica", "campo": "Ingeniería Electrónica", "inicio": "2021", "fin": "2027"}
+  ],
+  "experiencia": [
+    {"cargo": "Monitora académica", "empresa": "Universidad Nacional de Colombia", "inicio": "2024-02", "fin": null}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id_publico": "valentina-herrera-castro-fict",
+  "urn": "urn:li:member:FICT0003",
+  "nombres": "Valentina",
+  "apellidos": "Herrera Castro",
+  "ubicacion": "Hamburgo, Alemania",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia", "url_institucion": "https://www.linkedin.com/school/universidad-nacional-de-colombia/",
+     "titulo": "Bachelor of Science - BS", "campo": "Chemical Engineering", "inicio": "2011", "fin": "2016"},
+    {"institucion": "Instituto Tecnológico de Hamburgo", "titulo": "Master of Science - MS", "campo": "Process Engineering",
+     "inicio": "2024", "fin": "2027"}
+  ],
+  "experiencia": [
+    {"cargo": "Senior Process Engineer", "empresa": "Nordchem GmbH", "url_empresa": "https://www.linkedin.com/company/nordchem-fict/",
+     "industria_empresa": "Chemical Manufacturing", "tipo_empresa": "Privately Held", "tipo_empleo": "Full-time",
+     "modalidad": "Hybrid", "ubicacion": "Hamburgo, Alemania", "inicio": "2022-04", "fin": null},
+    {"cargo": "Ingeniera de procesos", "empresa": "Químicos Andinos S.A.", "url_empresa": "https://www.linkedin.com/company/quimicos-andinos-fict/",
+     "industria_empresa": "Chemical Manufacturing", "tipo_empresa": "Public Company", "tipo_empleo": "Full-time",
+     "modalidad": "On-site", "ubicacion": "Cali, Valle del Cauca, Colombia", "inicio": "2017-02", "fin": "2022-02"}
+  ]
+}

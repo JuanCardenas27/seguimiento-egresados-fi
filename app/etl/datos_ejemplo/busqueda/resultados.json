@@ -1,0 +1,48 @@
+[
+  {
+    "consulta": "site:linkedin.com/in \"Universidad Nacional de Colombia\" \"Ingeniería de Sistemas y Computación\"",
+    "resultados": [
+      {"url": "https://co.linkedin.com/in/Ana-Maria-Rojas-Perez-Fict/?trk=public_profile", "titulo": "Ana María Rojas Pérez - Ingeniera de datos sénior"},
+      {"url": "https://www.linkedin.com/in/ana-rojas-perez-2015-fict", "titulo": "Ana Maria Rojas Perez - Desarrolladora"},
+      {"url": "https://www.linkedin.com/posts/universidad-ejemplo_egresados-activity-0000000000", "titulo": "Publicación sobre egresados"}
+    ]
+  },
+  {
+    "consulta": "site:linkedin.com/in \"Universidad Nacional de Colombia\" \"Ingeniería Civil\"",
+    "resultados": [
+      {"url": "https://www.linkedin.com/in/carlos-gomez-salazar-fict", "titulo": "Carlos Andrés Gómez Salazar - Director de proyectos"},
+      {"url": "https://www.linkedin.com/in/laura-medina-fict", "titulo": "Laura Medina - Ingeniera civil"}
+    ]
+  },
+  {
+    "consulta": "site:linkedin.com/in \"Universidad Nacional de Colombia\" \"Ingeniería Eléctrica\"",
+    "resultados": [
+      {"url": "https://www.linkedin.com/in/daniela-torres-vargas-fict", "titulo": "Daniela Torres Vargas - Ingeniera de subestaciones"}
+    ]
+  },
+  {
+    "consulta": "site:linkedin.com/in \"Universidad Nacional de Colombia\" \"Ingeniería Electrónica\"",
+    "resultados": [
+      {"url": "https://www.linkedin.com/in/mariana-castillo-ortiz-fict", "titulo": "Mariana Castillo Ortiz - Estudiante"}
+    ]
+  },
+  {
+    "consulta": "site:linkedin.com/in \"Universidad Nacional de Colombia\" \"Ingeniería Industrial\"",
+    "resultados": [
+      {"url": "https://www.linkedin.com/in/julian-moreno-diaz-fict", "titulo": "Julián Moreno - Key Account Associate"}
+    ]
+  },
+  {
+    "consulta": "site:linkedin.com/in \"Universidad Nacional de Colombia\" \"Ingeniería Mecánica\"",
+    "resultados": [
+      {"url": "https://www.linkedin.com/in/pedro-alvarez-fict", "titulo": "Pedro Álvarez - Ingeniero mecánico"}
+    ]
+  },
+  {
+    "consulta": "site:linkedin.com/in \"Universidad Nacional de Colombia\" \"Ingeniería Química\"",
+    "resultados": [
+      {"url": "https://de.linkedin.com/in/valentina-herrera-castro-fict", "titulo": "Valentina Herrera Castro - Process Engineer"},
+      {"url": "https://www.linkedin.com/in/ana-maria-rojas-perez-fict", "titulo": "Ana María Rojas Pérez"}
+    ]
+  }
+]

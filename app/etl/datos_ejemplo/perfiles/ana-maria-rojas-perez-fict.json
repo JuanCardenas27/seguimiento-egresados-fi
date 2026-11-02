@@ -1,0 +1,32 @@
+{
+  "id_publico": "ana-maria-rojas-perez-fict",
+  "urn": "urn:li:member:FICT0001",
+  "nombres": "Ana María",
+  "apellidos": "Rojas Pérez",
+  "titular": "Ingeniera de datos sénior | Python | SQL",
+  "ubicacion": "Bogotá, D.C., Colombia",
+  "foto_url": "https://media.example/foto-ana.jpg",
+  "acerca_de": "Texto libre del perfil: no se conserva.",
+  "aptitudes": ["Python", "SQL", "Spark"],
+  "numero_contactos": 500,
+  "correo": "ana.ficticia@example.com",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia", "url_institucion": "https://www.linkedin.com/school/universidad-nacional-de-colombia/",
+     "titulo": "Ingeniera de Sistemas y Computación", "campo": "Ingeniería de Sistemas y Computación", "inicio": "2013", "fin": "2018",
+     "actividades": "Grupo estudiantil de ejemplo"},
+    {"institucion": "Universidad Nacional de Colombia", "url_institucion": "https://www.linkedin.com/school/universidad-nacional-de-colombia/",
+     "titulo": "Magíster en Ingeniería", "campo": "Ingeniería de Sistemas y Computación", "inicio": "2019", "fin": "2021"}
+  ],
+  "experiencia": [
+    {"cargo": "Ingeniera de datos sénior", "empresa": "Datalytica Colombia S.A.S.", "url_empresa": "https://www.linkedin.com/company/datalytica-colombia-fict/",
+     "industria_empresa": "IT Services and IT Consulting", "tipo_empresa": "Privately Held", "tipo_empleo": "Full-time",
+     "modalidad": "Remote", "ubicacion": "Bogotá, D.C., Colombia", "inicio": "2021-07", "fin": null,
+     "descripcion": "Descripción del cargo: no se conserva."},
+    {"cargo": "Desarrolladora backend", "empresa": "Andes Software S.A.S.", "url_empresa": "https://www.linkedin.com/company/andes-software-fict/",
+     "industria_empresa": "Software Development", "tipo_empresa": "Privately Held", "tipo_empleo": "Full-time",
+     "modalidad": "Hybrid", "ubicacion": "Bogotá, D.C., Colombia", "inicio": "2018-02", "fin": "2021-06"},
+    {"cargo": "Practicante de desarrollo de software", "empresa": "Andes Software S.A.S.", "url_empresa": "https://www.linkedin.com/company/andes-software-fict/",
+     "industria_empresa": "Software Development", "tipo_empresa": "Privately Held", "tipo_empleo": "Internship",
+     "modalidad": "On-site", "ubicacion": "Bogotá, D.C., Colombia", "inicio": "2017-07", "fin": "2017-12"}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id_publico": "ana-rojas-perez-2015-fict",
+  "nombres": "Ana Maria",
+  "apellidos": "Rojas Perez",
+  "ubicacion": "Bogotá, Colombia",
+  "educacion": [
+    {"institucion": "Universidad Nacional de Colombia", "titulo": "Ing. Sistemas", "campo": "Ingeniería de Sistemas",
+     "inicio": "2013", "fin": "2018"}
+  ],
+  "experiencia": [
+    {"cargo": "Desarrolladora", "empresa": "Andes Software", "ubicacion": "Bogotá", "inicio": "feb. de 2018", "fin": "actualidad"}
+  ]
+}
