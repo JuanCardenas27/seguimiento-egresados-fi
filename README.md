@@ -18,7 +18,7 @@ Proceso **automatizado** para identificar en LinkedIn a los egresados de la Facu
 - **Produce resultados comparables:** usa SNIES, CIIU, CIUO-08, DIVIPOLA e ISO 3166.
 - **Protege los datos desde el diseño:** lista blanca de campos, purga a los 90 días y cifras agregadas.
 - **Es económica y escalable:** software libre, un servidor y una API de búsqueda; otra facultad solo carga su catálogo de programas.
-- **Está probada:** funciona de principio a fin con datos ficticios (20 pruebas de la base de datos y 25 pruebas unitarias).
+- **Está probada:** funciona de principio a fin con datos ficticios (20 pruebas de la base de datos y 32 pruebas unitarias).
 
 ## Entregables
 
@@ -37,14 +37,14 @@ Proceso **automatizado** para identificar en LinkedIn a los egresados de la Facu
 
 1. **Descubrir.** Consultas por programa, en español e inglés (`site:linkedin.com/in "Universidad Nacional de Colombia" "Ingeniería Civil"`), a la API de un motor de búsqueda. Se normalizan las URL, se quitan los repetidos y se bloquean los perfiles de la lista de exclusión.
 2. **Extraer.** Hay dos canales con el mismo formato de salida:
-   - **Canal A (principal):** *web scraping* de la versión pública del perfil, sin iniciar sesión, a ritmo bajo y sin evadir controles. El repositorio incluye la primera versión del módulo (`conectores/scraping.py`); los perfiles de prueba simulan su salida.
+   - **Canal A (principal):** *web scraping* de la versión pública del perfil, sin iniciar sesión, a ritmo bajo y sin evadir controles. Un muro de inicio de sesión aislado marca el perfil como no disponible; tres seguidos se tratan como un bloqueo y detienen la extracción hasta el día siguiente. El repositorio incluye la primera versión del módulo (`conectores/scraping.py`); los perfiles de prueba simulan su salida.
    - **Canal B:** exportación de datos que entrega el propio egresado.
 
    Una lista blanca elimina los campos que no se necesitan, y una huella SHA-256 evita reprocesar los perfiles que no cambiaron.
-3. **Verificar.** Una rúbrica de 0 a 100 evalúa institución, programa, condición de egresado, sede y coherencia. Con 80 puntos o más y un programa reconocido, el perfil se acepta. Entre 50 y 79 pasa a revisión manual. Con menos de 50, y en el caso de estudiantes o de otras sedes, se descarta y solo queda la huella.
+3. **Verificar.** Una rúbrica de 0 a 100 evalúa institución, programa, condición de egresado, sede y coherencia. El programa solo cuenta si el título o el campo mencionan ingeniería; si el perfil no trae ninguno de los dos, se infiere de la consulta que lo encontró. Con 80 puntos o más y un programa reconocido, el perfil se acepta. Entre 50 y 79 pasa a revisión manual. Con menos de 50, o si es de otra sede, estudiante o de otra facultad, se descarta y solo queda la huella.
 4. **Estandarizar.** Se clasifican programa, nivel SNIES, CIIU Rev. 4 A.C., CIUO-08 A.C., nivel jerárquico, área, DIVIPOLA e ISO 3166-1 con diccionarios guardados en la base de datos.
-5. **Consolidar.** Se hace un *upsert* por huellas. Las tablas tienen historial de versiones (`SYSTEM VERSIONING`).
-6. **Controlar la calidad.** Se generan incidencias automáticas de información incompleta, ambigua, desactualizada, no verificable, posibles duplicados e inconsistencias.
+5. **Consolidar.** Se hace un *upsert* por huellas. Cada cambio o borrado de una formación o experiencia guarda la versión anterior en `historial_cambio` mediante disparadores (no se usa `SYSTEM VERSIONING` porque no permite borrar el historial de una persona en una supresión). Las cuentas fusionadas no se vuelven a consultar.
+6. **Controlar la calidad.** Se generan incidencias automáticas de información incompleta, ambigua, desactualizada, no verificable, posibles duplicados e inconsistencias. La detección es idempotente: no duplica incidencias, cierra las que ya no aplican y reabre las que reaparecen.
 7. **Publicar.** Vistas e indicadores agregados, en los que se ocultan los grupos de menos de cinco personas.
 
 ## Estructura del repositorio
@@ -55,7 +55,7 @@ Proceso **automatizado** para identificar en LinkedIn a los egresados de la Facu
 │   ├── Documento_Metodologico.docx   # Entregable 3.1 y 3.2 (APA)
 │   └── Documento_Metodologico.pdf
 ├── db/                               # Se ejecutan en orden al crear la base de datos
-│   ├── 01_esquema.sql                # Tablas, restricciones CHECK, triggers, evento de purga
+│   ├── 01_esquema.sql                # Tablas, CHECK, triggers, historial_cambio, eventos de purga
 │   ├── 02_catalogos.sql              # Catálogos estándar y diccionarios de homologación
 │   ├── 03_vistas_procedimientos.sql  # Vistas, homologación, incidencias, fusión, supresión
 │   ├── 04_pruebas_validacion.sql     # 20 pruebas automáticas de las reglas de la base
@@ -67,7 +67,7 @@ Proceso **automatizado** para identificar en LinkedIn a los egresados de la Facu
 │   │   ├── nucleo/                   # Normalización, fechas, geografía, verificación (rúbrica)
 │   │   ├── conectores/               # Búsqueda, canal A (scraping), canal B (exportación), archivos de prueba
 │   │   ├── datos_ejemplo/            # Perfiles y exportación ficticios
-│   │   └── tests/                    # 25 pruebas unitarias
+│   │   └── tests/                    # 32 pruebas unitarias
 │   └── egresados/                    # API REST de solo lectura (Django REST Framework)
 └── docker-compose.yml
 ```
@@ -122,7 +122,8 @@ Credenciales de desarrollo: `admin` / `admin_dev`.
 - Aplica minimización por lista blanca.
 - El contenido de las capturas se purga a los 90 días.
 - Se mantiene una lista de exclusión de titulares.
-- Hay un procedimiento de supresión.
+- Hay un procedimiento de supresión, que también borra el historial de versiones del titular.
+- El historial de versiones con más de cinco años se depura cada mes.
 - Los roles siguen el principio de mínimo privilegio.
 
 Todo se ajusta a la Ley 1581 de 2012 (detalle en el documento).
